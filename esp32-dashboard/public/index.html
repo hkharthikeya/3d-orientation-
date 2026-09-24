@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ESP32 MPU6050 3D Orientation Hub</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #0f0f1e 0%, #1a1a2e 100%);
+      color: #fff;
+      overflow: hidden;
+    }
+    
+    header {
+      background: rgba(20, 20, 35, 0.8);
+      padding: 15px 25px;
+      border-bottom: 1px solid rgba(100, 200, 255, 0.2);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .title { font-size: 24px; font-weight: bold; color: #64c8ff; }
+    .status {
+      display: flex;
+      gap: 15px;
+      align-items: center;
+    }
+    
+    .status-indicator {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    
+    .status-indicator.connected { background: #4ade80; }
+    .status-indicator.disconnected { background: #f87171; animation: none; }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    
+    .status-text { font-size: 12px; }
+    
+    button {
+      background: #64c8ff;
+      border: none;
+      color: #0f0f1e;
+      padding: 8px 16px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: 0.3s;
+    }
+    
+    button:hover { background: #4ab8ef; }
+    button:active { transform: scale(0.98); }
+    
+    .container {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 15px;
+      padding: 15px;
+      height: calc(100vh - 60px);
+    }
+    
+    .panel {
+      background: rgba(25, 25, 45, 0.6);
+      border: 1px solid rgba(100, 200, 255, 0.15);
+      border-radius: 10px;
+      padding: 20px;
+      backdrop-filter: blur(10px);
+    }
+    
+    #canvas3d {
+      width: 100%;
+      height: 400px;
+      border-radius: 8px;
+      background: #0a0a15;
+    }
+    
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+      margin-top: 15px;
+    }
+    
+    .data-card {
+      background: rgba(50, 50, 80, 0.4);
+      padding: 15px;
+      border-radius: 8px;
+      border-left: 3px solid #64c8ff;
+    }
+    
+    .data-card.x-axis { border-left-color: #ef4444; }
+    .data-card.y-axis { border-left-color: #4ade80; }
+    .data-card.z-axis { border-left-color: #3b82f6; }
+    
+    .data-label { font-size: 12px; color: #999; }
+    .data-value { font-size: 24px; font-weight: bold; margin: 5px 0; }
+    .data-rate { font-size: 11px; color: #666; }
+    
+    .control-section {
+      margin-top: 15px;
+      display: flex;
+      gap: 10px;
+    }
+    
+    #chartContainer {
+      height: 200px;
+      margin-top: 15px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">🚀 ESP32 MPU6050 3D Orientation Hub</div>
+    <div class="status">
+      <div class="status-indicator disconnected" id="indicator"></div>
+      <div class="status-text" id="statusText">Disconnected</div>
+      <button onclick="connectSerial()">Connect Serial</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="panel">
+      <h3>3D Orientation Visualization</h3>
+      <div id="canvas3d"></div>
+      
+      <div class="grid">
+        <div class="data-card x-axis">
+          <div class="data-label">ROLL (Ø)</div>
+          <div class="data-value" id="rollValue">0.00°</div>
+          <div class="data-rate" id="rollRate">Rate: 0 °/s</div>
+        </div>
+        <div class="data-card y-axis">
+          <div class="data-label">PITCH (Ø)</div>
+          <div class="data-value" id="pitchValue">0.00°</div>
+          <div class="data-rate" id="pitchRate">Rate: 0 °/s</div>
+        </div>
+        <div class="data-card z-axis">
+          <div class="data-label">YAW (Ψ)</div>
+          <div class="data-value" id="yawValue">0.00°</div>
+          <div class="data-rate" id="yawRate">Rate: 0 °/s</div>
+        </div>
+      </div>
+
+      <div class="control-section">
+        <button onclick="tareZero()">Tare Zero</button>
+        <button onclick="resetCam()">Reset Camera</button>
+      </div>
+
+      <div id="chartContainer">
+        <canvas id="accelChart"></canvas>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Telemetry & Config</h3>
+      
+      <div style="margin-bottom: 20px;">
+        <label>Serial Port:</label>
+        <select id="portSelect" style="width: 100%; padding: 8px; margin-top: 5px; border-radius: 5px; background: #333; color: #fff; border: 1px solid #555;">
+          <option value="COM3">COM3 (Windows)</option>
+          <option value="COM4">COM4 (Windows)</option>
+          <option value="COM5">COM5 (Windows)</option>
+          <option value="/dev/ttyUSB0">/dev/ttyUSB0 (Linux)</option>
+          <option value="/dev/cu.usbserial">Mac</option>
+        </select>
+      </div>
+
+      <table style="width: 100%; font-size: 12px;">
+        <tr style="border-bottom: 1px solid #444;">
+          <td style="padding: 8px;">FPS:</td>
+          <td style="text-align: right; color: #64c8ff;" id="fps">58</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #444;">
+          <td style="padding: 8px;">Packet Rate:</td>
+          <td style="text-align: right; color: #64c8ff;" id="packetRate">0 Hz</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #444;">
+          <td style="padding: 8px;">Filter Conv:</td>
+          <td style="text-align: right; color: #64c8ff;" id="filterConv">100%</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px;">Sensor Status:</td>
+          <td style="text-align: right; color: #4ade80;" id="sensorStatus">OK/Ready</td>
+        </tr>
+      </table>
+
+      <h4 style="margin-top: 20px;">Raw Telemetry</h4>
+      <table style="width: 100%; font-size: 11px; margin-top: 10px;">
+        <tr style="background: #333; font-weight: bold;">
+          <td style="padding: 6px;">Channel</td>
+          <td style="padding: 6px;">Acceleration</td>
+          <td style="padding: 6px;">Gyro (°/s)</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #444;">
+          <td style="padding: 6px; color: #ef4444;">X-Axis</td>
+          <td style="text-align: right;" id="accelX">0</td>
+          <td style="text-align: right;" id="gyroX">0</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #444;">
+          <td style="padding: 6px; color: #4ade80;">Y-Axis</td>
+          <td style="text-align: right;" id="accelY">0</td>
+          <td style="text-align: right;" id="gyroY">0</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px; color: #3b82f6;">Z-Axis</td>
+          <td style="text-align: right;" id="accelZ">0</td>
+          <td style="text-align: right;" id="gyroZ">0</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    // Three.js 3D Setup
+    const canvasContainer = document.getElementById('canvas3d');
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, canvasContainer.clientWidth / 400, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(canvasContainer.clientWidth, 400);
+    renderer.setClearColor(0x0a0a15);
+    canvasContainer.appendChild(renderer.domElement);
+
+    // Add 3D object (cube)
+    const geometry = new THREE.BoxGeometry(2, 1, 3);
+    const material = new THREE.MeshPhongMaterial({ color: 0x1a6b3d, shininess: 80 });
+    const cube = new THREE.Mesh(geometry, material);
+    scene.add(cube);
+
+    // Lighting
+    const light = new THREE.DirectionalLight(0xffffff, 0.8);
+    light.position.set(5, 10, 5);
+    scene.add(light);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+    // Axis helper
+    const axesHelper = new THREE.AxesHelper(3);
+    scene.add(axesHelper);
+
+    camera.position.set(0, 0, 6);
+    let controls = null;
+    if (typeof THREE.OrbitControls !== 'undefined') {
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+    }
+
+    // Data storage
+    let roll = 0, pitch = 0, yaw = 0;
+    let tareRoll = 0, tarePitch = 0, tareYaw = 0;
+    let accelData = { x: [], y: [], z: [], labels: [] };
+    let lastTime = Date.now();
+    let frameCount = 0;
+    let packetCount = 0;
+    let lastPacketTime = Date.now();
+
+    // Chart setup
+    const ctx = document.getElementById('accelChart').getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          { label: 'AX', data: [], borderColor: '#ef4444', tension: 0.3, pointRadius: 0, borderWidth: 2 },
+          { label: 'AY', data: [], borderColor: '#4ade80', tension: 0.3, pointRadius: 0, borderWidth: 2 },
+          { label: 'AZ', data: [], borderColor: '#3b82f6', tension: 0.3, pointRadius: 0, borderWidth: 2 }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        scales: {
+          x: { display: false },
+          y: { grid: { color: 'rgba(255,255,255,0.05)' } }
+        }
+      }
+    });
+
+    // Populate dynamic ports from backend API
+    fetch('/api/ports')
+      .then(res => res.json())
+      .then(ports => {
+        if (ports && ports.length > 0) {
+          const select = document.getElementById('portSelect');
+          select.innerHTML = '';
+          ports.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p.path;
+            opt.textContent = `${p.path} (${p.manufacturer || 'Serial Device'})`;
+            select.appendChild(opt);
+          });
+        }
+      })
+      .catch(() => {});
+
+    // WebSocket connection
+    let ws = null;
+
+    function connectSerial() {
+      const port = document.getElementById('portSelect').value;
+      
+      // Request server to switch to selected port
+      fetch(`/api/connect/${encodeURIComponent(port)}`, { method: 'POST' }).catch(()=>{});
+
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        return;
+      }
+
+      ws = new WebSocket(`ws://${window.location.hostname || 'localhost'}:3000`);
+      
+      ws.onopen = () => {
+        console.log('Connected to WebSocket server');
+        updateStatus('Connected', true);
+      };
+
+      ws.onmessage = (event) => {
+        const data = event.data.trim();
+        if (data.includes(',')) {
+          parseAndDisplay(data);
+        }
+      };
+
+      ws.onerror = () => {
+        updateStatus('Connection Error', false);
+      };
+
+      ws.onclose = () => {
+        updateStatus('Disconnected', false);
+      };
+    }
+
+    function parseAndDisplay(dataString) {
+      const tokens = dataString.split(',').map(v => {
+        const parts = v.split(':');
+        return parseFloat(parts.length > 1 ? parts[1] : v);
+      });
+
+      if (tokens.length >= 9) {
+        packetCount++;
+        [roll, pitch, yaw] = tokens.slice(0, 3);
+        const [ax, ay, az, gx, gy, gz] = tokens.slice(3);
+
+        const effRoll = roll - tareRoll;
+        const effPitch = pitch - tarePitch;
+        const effYaw = yaw - tareYaw;
+
+        // Update 3D rotation
+        cube.rotation.x = effPitch * Math.PI / 180;
+        cube.rotation.y = effYaw * Math.PI / 180;
+        cube.rotation.z = -effRoll * Math.PI / 180;
+
+        // Update displays
+        document.getElementById('rollValue').textContent = effRoll.toFixed(2) + '°';
+        document.getElementById('pitchValue').textContent = effPitch.toFixed(2) + '°';
+        document.getElementById('yawValue').textContent = effYaw.toFixed(2) + '°';
+
+        document.getElementById('rollRate').textContent = `Rate: ${gx} °/s`;
+        document.getElementById('pitchRate').textContent = `Rate: ${gy} °/s`;
+        document.getElementById('yawRate').textContent = `Rate: ${gz} °/s`;
+
+        document.getElementById('accelX').textContent = ax;
+        document.getElementById('accelY').textContent = ay;
+        document.getElementById('accelZ').textContent = az;
+        document.getElementById('gyroX').textContent = gx;
+        document.getElementById('gyroY').textContent = gy;
+        document.getElementById('gyroZ').textContent = gz;
+
+        // Update chart
+        if (accelData.x.length > 50) {
+          accelData.x.shift();
+          accelData.y.shift();
+          accelData.z.shift();
+          accelData.labels.shift();
+        }
+        accelData.x.push(ax);
+        accelData.y.push(ay);
+        accelData.z.push(az);
+        accelData.labels.push(accelData.labels.length);
+
+        chart.data.labels = accelData.labels;
+        chart.data.datasets[0].data = accelData.x;
+        chart.data.datasets[1].data = accelData.y;
+        chart.data.datasets[2].data = accelData.z;
+        chart.update('none');
+      }
+    }
+
+    function updateStatus(text, connected) {
+      document.getElementById('statusText').textContent = text;
+      const indicator = document.getElementById('indicator');
+      indicator.className = 'status-indicator ' + (connected ? 'connected' : 'disconnected');
+    }
+
+    function tareZero() {
+      tareRoll = roll;
+      tarePitch = pitch;
+      tareYaw = yaw;
+    }
+
+    function resetCam() {
+      camera.position.set(0, 0, 6);
+      camera.lookAt(0, 0, 0);
+      if (controls) {
+        controls.target.set(0, 0, 0);
+        controls.update();
+      }
+    }
+
+    // Packet rate & stability interval
+    setInterval(() => {
+      const now = Date.now();
+      const dt = (now - lastPacketTime) / 1000;
+      document.getElementById('packetRate').textContent = `${Math.round(packetCount / dt)} Hz`;
+      packetCount = 0;
+      lastPacketTime = now;
+    }, 1000);
+
+    // Animation loop
+    function animate() {
+      requestAnimationFrame(animate);
+      if (controls) controls.update();
+      renderer.render(scene, camera);
+      
+      frameCount++;
+      const now = Date.now();
+      if (now - lastTime >= 1000) {
+        document.getElementById('fps').textContent = frameCount;
+        frameCount = 0;
+        lastTime = now;
+      }
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = canvasContainer.clientWidth / 400;
+      camera.updateProjectionMatrix();
+      renderer.setSize(canvasContainer.clientWidth, 400);
+    });
+
+    // Auto-connect on load
+    setTimeout(() => connectSerial(), 500);
+  </script>
+</body>
+</html>

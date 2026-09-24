@@ -1,0 +1,18 @@
+{
+  "name": "esp32-mpu6050-3d-tracker",
+  "version": "1.0.0",
+  "description": "Real-time 3D orientation visualization and sensor telemetry dashboard for ESP32 and MPU6050",
+  "main": "index.html",
+  "scripts": {
+    "dev": "vite",
+    "start": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": ["esp32", "mpu6050", "threejs", "webserial", "websocket", "imu", "3d"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "vite": "^5.4.0"
+  }
+}

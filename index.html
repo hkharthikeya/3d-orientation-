@@ -1,0 +1,1638 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ESP32 + MPU6050 3D Real-Time Orientation Tracker</title>
+  <meta name="description" content="Real-time 3D orientation visualization and sensor telemetry dashboard for ESP32 and MPU6050 using WebSerial, WebSockets, and Three.js." />
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Three.js and OrbitControls -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    /* Dark Theme (Default) */
+    :root[data-theme="dark"] {
+      --bg-gradient: radial-gradient(circle at 15% 20%, #151a30 0%, #080a10 70%, #030408 100%);
+      --header-bg: rgba(10, 14, 24, 0.85);
+      --card-bg: rgba(18, 24, 38, 0.75);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --canvas-bg: #0a0e18;
+      --canvas-gradient: radial-gradient(circle at center, #182236 0%, #0d121e 100%);
+      --grid-center: 0x00f2fe;
+      --grid-lines: 0x1f2a44;
+      --accent-cyan: #00f2fe;
+      --accent-purple: #4facfe;
+      --axis-x: #ff4757;
+      --axis-y: #2ed573;
+      --axis-z: #1e90ff;
+      --text-main: #f1f2f6;
+      --text-muted: #8892b0;
+      --calibrated: #2ed573;
+      --uncalibrated: #ffa502;
+      --input-bg: rgba(0, 0, 0, 0.35);
+      --input-text: #ffffff;
+      --btn-bg: rgba(255, 255, 255, 0.05);
+      --btn-border: rgba(255, 255, 255, 0.12);
+      --btn-text: #ffffff;
+      --btn-hover: rgba(255, 255, 255, 0.12);
+      --chip-bg: rgba(10, 14, 24, 0.75);
+      --terminal-bg: #030408;
+      --terminal-text: #2ed573;
+      --shadow-color: rgba(0, 0, 0, 0.37);
+      --chart-grid: rgba(255, 255, 255, 0.05);
+    }
+
+    /* Light Theme */
+    :root[data-theme="light"] {
+      --bg-gradient: radial-gradient(circle at 15% 20%, #eef2f7 0%, #e0e7f1 70%, #d4deec 100%);
+      --header-bg: rgba(255, 255, 255, 0.85);
+      --card-bg: rgba(255, 255, 255, 0.82);
+      --card-border: rgba(0, 0, 0, 0.08);
+      --canvas-bg: #e8ecf4;
+      --canvas-gradient: radial-gradient(circle at center, #ffffff 0%, #dbe2ef 100%);
+      --grid-center: 0x0070f3;
+      --grid-lines: 0xc8d6e5;
+      --accent-cyan: #0070f3;
+      --accent-purple: #7928ca;
+      --axis-x: #e84118;
+      --axis-y: #10ac84;
+      --axis-z: #0984e3;
+      --text-main: #1e293b;
+      --text-muted: #64748b;
+      --calibrated: #10ac84;
+      --uncalibrated: #e67e22;
+      --input-bg: rgba(241, 245, 249, 0.9);
+      --input-text: #0f172a;
+      --btn-bg: rgba(0, 0, 0, 0.04);
+      --btn-border: rgba(0, 0, 0, 0.12);
+      --btn-text: #1e293b;
+      --btn-hover: rgba(0, 0, 0, 0.08);
+      --chip-bg: rgba(255, 255, 255, 0.85);
+      --terminal-bg: #1e293b;
+      --terminal-text: #48dbfb;
+      --shadow-color: rgba(100, 116, 139, 0.12);
+      --chart-grid: rgba(0, 0, 0, 0.06);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    body {
+      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-gradient);
+      color: var(--text-main);
+      min-height: 100vh;
+      overflow-x: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: background 0.3s ease, color 0.3s ease;
+    }
+
+    /* Glassmorphism Panel Common */
+    .glass-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      box-shadow: 0 8px 32px 0 var(--shadow-color);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .glass-card:hover {
+      border-color: var(--accent-cyan);
+      box-shadow: 0 12px 40px 0 var(--shadow-color);
+    }
+
+    /* Header */
+    header {
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--card-border);
+      background: var(--header-bg);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      transition: all 0.3s ease;
+    }
+
+    .brand-section {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .logo-badge {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #00f2fe, #4facfe);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 20px rgba(0, 242, 254, 0.4);
+    }
+
+    .logo-badge svg {
+      width: 24px;
+      height: 24px;
+      fill: #030408;
+    }
+
+    .brand-title h1 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: var(--text-main);
+    }
+
+    :root[data-theme="dark"] .brand-title h1 {
+      background: linear-gradient(90deg, #ffffff, #00f2fe);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    :root[data-theme="light"] .brand-title h1 {
+      background: linear-gradient(90deg, #0f172a, #0070f3);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .brand-title p {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      border-radius: 10px;
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid var(--btn-border);
+      background: var(--btn-bg);
+      color: var(--btn-text);
+      transition: all 0.25s ease;
+    }
+
+    .btn:hover {
+      background: var(--btn-hover);
+      transform: translateY(-1px);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #00f2fe, #4facfe);
+      color: #030408;
+      border: none;
+      font-weight: 700;
+      box-shadow: 0 0 15px rgba(0, 242, 254, 0.3);
+    }
+
+    .btn-primary:hover {
+      box-shadow: 0 0 25px rgba(0, 242, 254, 0.6);
+      transform: translateY(-2px);
+    }
+
+    .btn-danger {
+      background: rgba(255, 71, 87, 0.15);
+      border-color: rgba(255, 71, 87, 0.3);
+      color: #ff4757;
+    }
+
+    .btn-danger:hover {
+      background: rgba(255, 71, 87, 0.25);
+    }
+
+    .theme-toggle-btn {
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      cursor: pointer;
+      border: 1px solid var(--btn-border);
+      background: var(--btn-bg);
+      color: var(--text-main);
+      transition: all 0.25s ease;
+    }
+
+    .theme-toggle-btn:hover {
+      background: var(--btn-hover);
+      transform: translateY(-1px);
+    }
+
+    .theme-toggle-btn svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.82rem;
+      font-weight: 500;
+      background: var(--btn-bg);
+      border: 1px solid var(--card-border);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #747d8c;
+    }
+
+    .dot.connected {
+      background: #2ed573;
+      box-shadow: 0 0 10px #2ed573;
+      animation: pulse 2s infinite;
+    }
+
+    .dot.calibrated {
+      background: #2ed573;
+      box-shadow: 0 0 8px #2ed573;
+    }
+
+    .dot.uncalibrated {
+      background: #ffa502;
+      box-shadow: 0 0 8px #ffa502;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.3); opacity: 0.7; }
+    }
+
+    /* Main Grid Layout */
+    .dashboard-container {
+      display: grid;
+      grid-template-columns: 1fr 390px;
+      gap: 20px;
+      padding: 20px;
+      flex: 1;
+      max-width: 1700px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    /* 3D Viewport Column */
+    .viewport-column {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .canvas-wrapper {
+      position: relative;
+      height: 480px;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid var(--card-border);
+      background: var(--canvas-gradient);
+    }
+
+    #three-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* Overlay Controls */
+    .canvas-overlay {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      display: flex;
+      gap: 8px;
+      z-index: 10;
+    }
+
+    .canvas-overlay-right {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      display: flex;
+      gap: 8px;
+      z-index: 10;
+    }
+
+    .overlay-chip {
+      background: var(--chip-bg);
+      border: 1px solid var(--card-border);
+      backdrop-filter: blur(8px);
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 0.78rem;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .overlay-chip strong {
+      color: var(--text-main);
+    }
+
+    /* Axis Orientation Legend */
+    .axis-legend {
+      position: absolute;
+      bottom: 16px;
+      left: 16px;
+      display: flex;
+      gap: 12px;
+      background: var(--chip-bg);
+      padding: 8px 16px;
+      border-radius: 10px;
+      backdrop-filter: blur(8px);
+      border: 1px solid var(--card-border);
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .legend-color {
+      width: 12px;
+      height: 4px;
+      border-radius: 2px;
+    }
+
+    /* Quick Reset Views */
+    .canvas-actions {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn-icon {
+      padding: 6px 12px;
+      font-size: 0.75rem;
+    }
+
+    /* Telemetry Tele-Cards */
+    .orientation-cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+
+    .tele-card {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .tele-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 4px;
+      height: 100%;
+    }
+
+    .tele-card.x-axis::before { background: var(--axis-x); box-shadow: 0 0 10px var(--axis-x); }
+    .tele-card.y-axis::before { background: var(--axis-y); box-shadow: 0 0 10px var(--axis-y); }
+    .tele-card.z-axis::before { background: var(--axis-z); box-shadow: 0 0 10px var(--axis-z); }
+
+    .tele-title {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .tele-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin: 8px 0;
+      color: var(--text-main);
+    }
+
+    .tele-unit {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      margin-left: 4px;
+      font-weight: 400;
+    }
+
+    .tele-sub {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Right Sidebar Panel */
+    .sidebar-column {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .panel-section {
+      padding: 20px;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .section-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .section-title svg {
+      width: 16px;
+      height: 16px;
+      fill: var(--accent-cyan);
+    }
+
+    /* Connection Settings */
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .input-label {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .input-field {
+      background: var(--input-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: var(--input-text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .input-field:focus {
+      border-color: var(--accent-cyan);
+    }
+
+    .connection-buttons {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    /* Calibration Card */
+    .calibration-box {
+      background: var(--input-bg);
+      border-radius: 10px;
+      padding: 12px;
+      border: 1px solid var(--card-border);
+    }
+
+    .calib-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.82rem;
+      margin-bottom: 8px;
+    }
+
+    .calib-progress-bar {
+      height: 6px;
+      background: var(--btn-hover);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 6px;
+    }
+
+    .calib-progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--uncalibrated), var(--calibrated));
+      transition: width 0.3s ease;
+    }
+
+    /* Data Inspector Table */
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+    }
+
+    .data-table th {
+      text-align: left;
+      padding: 6px 8px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--card-border);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+    }
+
+    .data-table td {
+      padding: 7px 8px;
+      border-bottom: 1px solid var(--card-border);
+    }
+
+    .val-tag {
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    .val-x { color: var(--axis-x); }
+    .val-y { color: var(--axis-y); }
+    .val-z { color: var(--axis-z); }
+
+    /* Chart Panel */
+    .chart-panel {
+      padding: 20px;
+    }
+
+    .chart-container {
+      position: relative;
+      height: 180px;
+      width: 100%;
+    }
+
+    /* Code Snippet Helper */
+    .code-preview {
+      background: var(--input-bg);
+      border-radius: 8px;
+      padding: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      color: var(--calibrated);
+      border: 1px dashed var(--card-border);
+      overflow-x: auto;
+      white-space: pre;
+    }
+
+    /* Raw Log Terminal */
+    .log-terminal {
+      height: 100px;
+      background: var(--terminal-bg);
+      border-radius: 8px;
+      padding: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      color: var(--terminal-text);
+      overflow-y: auto;
+      border: 1px solid var(--card-border);
+    }
+
+    .log-line {
+      margin-bottom: 2px;
+      word-break: break-all;
+    }
+
+    .log-line.err { color: #ff4757; }
+    .log-line.info { color: #00f2fe; }
+    :root[data-theme="light"] .log-line.info { color: #4facfe; }
+
+    /* Responsive */
+    @media (max-width: 1100px) {
+      .dashboard-container {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header Navigation -->
+  <header>
+    <div class="brand-section">
+      <div class="logo-badge">
+        <svg viewBox="0 0 24 24">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+        </svg>
+      </div>
+      <div class="brand-title">
+        <h1>ESP32 MPU6050 3D Orientation Hub</h1>
+        <p>Live IMU WebSerial & WebSocket Telemetry</p>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <!-- Light / Dark Mode Toggle -->
+      <button class="theme-toggle-btn" id="btn-theme-toggle" title="Toggle Light / Dark Mode">
+        <svg id="theme-icon-sun" style="display:none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="5"></circle>
+          <line x1="12" y1="1" x2="12" y2="3"></line>
+          <line x1="12" y1="21" x2="12" y2="23"></line>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+          <line x1="1" y1="12" x2="3" y2="12"></line>
+          <line x1="21" y1="12" x2="23" y2="12"></line>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+        </svg>
+        <svg id="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+        </svg>
+      </button>
+
+      <div class="status-indicator">
+        <span class="dot" id="connection-dot"></span>
+        <span id="connection-status-text">Disconnected</span>
+      </div>
+
+      <div class="status-indicator">
+        <span class="dot uncalibrated" id="calib-dot"></span>
+        <span id="calib-status-text">Calibrating...</span>
+      </div>
+
+      <button class="btn btn-primary" id="btn-webserial" title="Connect directly to ESP32 via USB Cable">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        Connect Serial
+      </button>
+
+      <button class="btn" id="btn-demo-mode" title="Toggle simulation data generator">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <span id="demo-btn-text">Start Demo</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Dashboard Main Grid -->
+  <main class="dashboard-container">
+
+    <!-- Left Column: 3D Visualization & Realtime Cards & Charts -->
+    <div class="viewport-column">
+      
+      <!-- 3D Three.js Viewport -->
+      <div class="canvas-wrapper glass-card">
+        <div class="canvas-overlay">
+          <div class="overlay-chip">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            FPS: <strong id="fps-display">60</strong>
+          </div>
+          <div class="overlay-chip">
+            Packet Rate: <strong id="rate-display">0 Hz</strong>
+          </div>
+        </div>
+
+        <div class="canvas-overlay-right">
+          <div class="overlay-chip">
+            Model: 
+            <select id="model-select" style="background:transparent; color:var(--accent-cyan); border:none; outline:none; font-family:'JetBrains Mono'; font-weight:700; cursor:pointer;">
+              <option value="cube" style="background:var(--card-bg); color:var(--text-main);">ESP32 PCB Module</option>
+              <option value="drone" style="background:var(--card-bg); color:var(--text-main);">Quadcopter Frame</option>
+              <option value="box" style="background:var(--card-bg); color:var(--text-main);">Calibration Cube</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="axis-legend">
+          <div class="legend-item"><div class="legend-color" style="background: var(--axis-x);"></div> X (Roll / Pitch)</div>
+          <div class="legend-item"><div class="legend-color" style="background: var(--axis-y);"></div> Y (Pitch / Yaw)</div>
+          <div class="legend-item"><div class="legend-color" style="background: var(--axis-z);"></div> Z (Yaw / Heading)</div>
+        </div>
+
+        <div class="canvas-actions">
+          <button class="btn btn-icon" id="btn-zero-orientation" title="Tare / Zero Current Position">Tare Zero</button>
+          <button class="btn btn-icon" id="btn-reset-cam" title="Reset Camera View">Reset Cam</button>
+        </div>
+
+        <canvas id="three-canvas"></canvas>
+      </div>
+
+      <!-- Realtime Attitude (Roll/Pitch/Yaw) -->
+      <div class="orientation-cards">
+        <div class="glass-card tele-card x-axis">
+          <div class="tele-title">
+            <span>Roll (&Phi;)</span>
+            <span class="val-x">X-Axis</span>
+          </div>
+          <div class="tele-value" id="val-roll">0.00<span class="tele-unit">&deg;</span></div>
+          <div class="tele-sub">
+            <span>Rate: <span id="val-gx">0</span> &deg;/s</span>
+            <span>Acc: <span id="val-ax-sub">0.00</span>g</span>
+          </div>
+        </div>
+
+        <div class="glass-card tele-card y-axis">
+          <div class="tele-title">
+            <span>Pitch (&Theta;)</span>
+            <span class="val-y">Y-Axis</span>
+          </div>
+          <div class="tele-value" id="val-pitch">0.00<span class="tele-unit">&deg;</span></div>
+          <div class="tele-sub">
+            <span>Rate: <span id="val-gy">0</span> &deg;/s</span>
+            <span>Acc: <span id="val-ay-sub">0.00</span>g</span>
+          </div>
+        </div>
+
+        <div class="glass-card tele-card z-axis">
+          <div class="tele-title">
+            <span>Yaw (&Psi;)</span>
+            <span class="val-z">Z-Axis</span>
+          </div>
+          <div class="tele-value" id="val-yaw">0.00<span class="tele-unit">&deg;</span></div>
+          <div class="tele-sub">
+            <span>Rate: <span id="val-gz">0</span> &deg;/s</span>
+            <span>Acc: <span id="val-az-sub">0.00</span>g</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Real-Time Acceleration Waveform Chart -->
+      <div class="glass-card chart-panel">
+        <div class="section-header">
+          <div class="section-title">
+            <svg viewBox="0 0 24 24"><path d="M3 3v18h18M18 17l-4-4-4 4-4-4"/></svg>
+            Live Accelerometer Waveform (ax, ay, az)
+          </div>
+          <div style="font-size: 0.75rem; color: var(--text-muted); font-family: 'JetBrains Mono';">
+            Range: &plusmn;2g / Raw LSB
+          </div>
+        </div>
+        <div class="chart-container">
+          <canvas id="accelChart"></canvas>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Right Column: Sensor Controls, Gyro Readout, WebSocket, Diagnostics -->
+    <div class="sidebar-column">
+
+      <!-- Connectivity Manager -->
+      <div class="glass-card panel-section">
+        <div class="section-header">
+          <div class="section-title">
+            <svg viewBox="0 0 24 24"><path d="M5 12.55a11 11 0 0 1 14.08 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/></svg>
+            Data Link Interface
+          </div>
+        </div>
+
+        <!-- Serial Config -->
+        <div class="input-group">
+          <label class="input-label">Baud Rate (WebSerial):</label>
+          <select id="serial-baud" class="input-field">
+            <option value="115200" selected>115200 bps (Recommended)</option>
+            <option value="9600">9600 bps</option>
+            <option value="57600">57600 bps</option>
+            <option value="230400">230400 bps</option>
+            <option value="921600">921600 bps</option>
+          </select>
+        </div>
+
+        <!-- WebSocket Config -->
+        <div class="input-group">
+          <label class="input-label">ESP32 WebSocket URL:</label>
+          <input type="text" id="ws-url" class="input-field" value="ws://192.168.4.1:81" placeholder="ws://esp32.local:81" />
+        </div>
+
+        <div class="connection-buttons">
+          <button class="btn btn-primary" id="btn-ws-connect">Connect WS</button>
+          <button class="btn btn-danger" id="btn-disconnect">Disconnect</button>
+        </div>
+      </div>
+
+      <!-- Calibration & System State -->
+      <div class="glass-card panel-section">
+        <div class="section-header">
+          <div class="section-title">
+            <svg viewBox="0 0 24 24"><polygon points="12 2 2 22 22 22"/></svg>
+            Calibration & Stability
+          </div>
+          <button class="btn btn-icon" id="btn-trigger-calib">Calibrate</button>
+        </div>
+
+        <div class="calibration-box">
+          <div class="calib-row">
+            <span>Sensor Status:</span>
+            <span id="calib-status-badge" style="color: var(--calibrated); font-weight:700;">OK / Ready</span>
+          </div>
+          <div class="calib-row">
+            <span>Filter Convergence:</span>
+            <span id="calib-percent">100%</span>
+          </div>
+          <div class="calib-progress-bar">
+            <div class="calib-progress-fill" id="calib-progress" style="width: 100%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detailed Sensor Raw Telemetry Table -->
+      <div class="glass-card panel-section">
+        <div class="section-header">
+          <div class="section-title">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+            Raw Telemetry Table
+          </div>
+        </div>
+
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Channel</th>
+              <th>Acceleration</th>
+              <th>Gyro (&deg;/s)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="val-x">X-Axis</span></td>
+              <td id="table-ax">0</td>
+              <td id="table-gx">0</td>
+            </tr>
+            <tr>
+              <td><span class="val-y">Y-Axis</span></td>
+              <td id="table-ay">0</td>
+              <td id="table-gy">0</td>
+            </tr>
+            <tr>
+              <td><span class="val-z">Z-Axis</span></td>
+              <td id="table-az">0</td>
+              <td id="table-gz">0</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Expected Protocol Reference -->
+      <div class="glass-card panel-section">
+        <div class="section-header">
+          <div class="section-title">
+            <svg viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            Expected ESP32 Protocol
+          </div>
+        </div>
+        <div class="code-preview">format: roll,pitch,yaw,ax,ay,az,gx,gy,gz
+e.g. 12.45,-5.20,180.12,120,-45,16384,12,-3,2</div>
+      </div>
+
+      <!-- Live Serial/WS Stream Log -->
+      <div class="glass-card panel-section" style="padding: 14px;">
+        <div class="section-header" style="margin-bottom: 8px;">
+          <div class="section-title" style="font-size: 0.8rem;">Packet Terminal</div>
+          <span style="font-size: 0.7rem; color: var(--text-muted); cursor: pointer;" id="btn-clear-log">Clear</span>
+        </div>
+        <div class="log-terminal" id="log-term">
+          <div class="log-line info">[System] Web interface ready. Connect your ESP32 via USB Serial or WebSocket.</div>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <script>
+    /**
+     * ESP32 + MPU6050 3D Web Visualizer
+     * Uses Three.js for 3D render, WebSerial & WebSockets for streaming telemetry, and Chart.js for real-time graphs.
+     */
+
+    // State Variables
+    let currentTheme = localStorage.getItem('theme') || 'dark';
+    let sensorData = {
+      roll: 0.0,
+      pitch: 0.0,
+      yaw: 0.0,
+      ax: 0,
+      ay: 0,
+      az: 16384,
+      gx: 0,
+      gy: 0,
+      gz: 0
+    };
+
+    let tareOffset = { roll: 0, pitch: 0, yaw: 0 };
+    let isConnected = false;
+    let isDemoMode = false;
+    let demoInterval = null;
+    let serialPort = null;
+    let serialReader = null;
+    let socket = null;
+    let packetCount = 0;
+    let lastPacketTime = performance.now();
+    let packetRate = 0;
+
+    // UI Elements
+    const rootEl = document.documentElement;
+    const btnThemeToggle = document.getElementById('btn-theme-toggle');
+    const themeIconSun = document.getElementById('theme-icon-sun');
+    const themeIconMoon = document.getElementById('theme-icon-moon');
+    const connectionDot = document.getElementById('connection-dot');
+    const connectionStatusText = document.getElementById('connection-status-text');
+    const calibDot = document.getElementById('calib-dot');
+    const calibStatusText = document.getElementById('calib-status-text');
+    const calibProgress = document.getElementById('calib-progress');
+    const calibPercent = document.getElementById('calib-percent');
+    const fpsDisplay = document.getElementById('fps-display');
+    const rateDisplay = document.getElementById('rate-display');
+    const logTerm = document.getElementById('log-term');
+
+    // Value Labels
+    const valRoll = document.getElementById('val-roll');
+    const valPitch = document.getElementById('val-pitch');
+    const valYaw = document.getElementById('val-yaw');
+    const valGx = document.getElementById('val-gx');
+    const valGy = document.getElementById('val-gy');
+    const valGz = document.getElementById('val-gz');
+    const valAxSub = document.getElementById('val-ax-sub');
+    const valAySub = document.getElementById('val-ay-sub');
+    const valAzSub = document.getElementById('val-az-sub');
+    const tableAx = document.getElementById('table-ax');
+    const tableAy = document.getElementById('table-ay');
+    const tableAz = document.getElementById('table-az');
+    const tableGx = document.getElementById('table-gx');
+    const tableGy = document.getElementById('table-gy');
+    const tableGz = document.getElementById('table-gz');
+
+    function addLog(msg, type = '') {
+      const line = document.createElement('div');
+      line.className = `log-line ${type}`;
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      logTerm.appendChild(line);
+      logTerm.scrollTop = logTerm.scrollHeight;
+      while (logTerm.children.length > 50) {
+        logTerm.removeChild(logTerm.firstChild);
+      }
+    }
+
+    document.getElementById('btn-clear-log').addEventListener('click', () => {
+      logTerm.innerHTML = '';
+    });
+
+    // -------------------------------------------------------------
+    // THREE.JS SETUP
+    // -------------------------------------------------------------
+    const canvasContainer = document.querySelector('.canvas-wrapper');
+    const canvas = document.getElementById('three-canvas');
+    
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(currentTheme === 'dark' ? 0x0a0e18 : 0xe8ecf4);
+
+    const camera = new THREE.PerspectiveCamera(45, canvasContainer.clientWidth / canvasContainer.clientHeight, 0.1, 1000);
+    camera.position.set(4, 3, 5);
+
+    const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
+    renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+
+    // OrbitControls fallback check
+    let controls;
+    if (typeof THREE.OrbitControls !== 'undefined') {
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+    }
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, currentTheme === 'dark' ? 0.7 : 0.9);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0x00f2fe, 1.2);
+    dirLight.position.set(5, 10, 7);
+    scene.add(dirLight);
+
+    const pointLight = new THREE.PointLight(0xff4757, 1, 10);
+    pointLight.position.set(-4, -2, -3);
+    scene.add(pointLight);
+
+    // Grid Floor
+    let gridHelper = new THREE.GridHelper(12, 24, currentTheme === 'dark' ? 0x00f2fe : 0x0070f3, currentTheme === 'dark' ? 0x1f2a44 : 0xc8d6e5);
+    gridHelper.position.y = -1.6;
+    scene.add(gridHelper);
+
+    // Object Group
+    const modelGroup = new THREE.Group();
+    scene.add(modelGroup);
+
+    // Create 3D Meshes (ESP32 Board Style)
+    function createESP32Model() {
+      modelGroup.clear();
+
+      // Main PCB board
+      const pcbGeo = new THREE.BoxGeometry(2.4, 0.1, 3.6);
+      const pcbMat = new THREE.MeshStandardMaterial({
+        color: 0x0f381e, // PCB Green
+        roughness: 0.3,
+        metalness: 0.2
+      });
+      const pcb = new THREE.Mesh(pcbGeo, pcbMat);
+      modelGroup.add(pcb);
+
+      // ESP32 Metal Shield (Microcontroller)
+      const shieldGeo = new THREE.BoxGeometry(1.4, 0.18, 1.8);
+      const shieldMat = new THREE.MeshStandardMaterial({
+        color: 0xdcdde1,
+        metalness: 0.8,
+        roughness: 0.2
+      });
+      const shield = new THREE.Mesh(shieldGeo, shieldMat);
+      shield.position.set(0, 0.1, -0.4);
+      modelGroup.add(shield);
+
+      // MPU-6050 IC Sensor Chip
+      const mpuGeo = new THREE.BoxGeometry(0.6, 0.12, 0.6);
+      const mpuMat = new THREE.MeshStandardMaterial({
+        color: 0x1e272e,
+        roughness: 0.5
+      });
+      const mpu = new THREE.Mesh(mpuGeo, mpuMat);
+      mpu.position.set(0, 0.08, 0.9);
+      modelGroup.add(mpu);
+
+      // Header Pins Left & Right
+      const pinMat = new THREE.MeshStandardMaterial({ color: 0xe1b12c, metalness: 0.9, roughness: 0.1 });
+      const pinGeo = new THREE.BoxGeometry(0.12, 0.3, 3.2);
+      
+      const pinLeft = new THREE.Mesh(pinGeo, pinMat);
+      pinLeft.position.set(-1.05, -0.15, 0);
+      modelGroup.add(pinLeft);
+
+      const pinRight = new THREE.Mesh(pinGeo, pinMat);
+      pinRight.position.set(1.05, -0.15, 0);
+      modelGroup.add(pinRight);
+
+      // Add Colored Axis Reference Arrows directly attached to model
+      const arrowLength = 2.2;
+      const arrowHeadLength = 0.4;
+      const arrowHeadWidth = 0.2;
+
+      const dirX = new THREE.Vector3(1, 0, 0);
+      const arrowX = new THREE.ArrowHelper(dirX, new THREE.Vector3(0, 0, 0), arrowLength, 0xff4757, arrowHeadLength, arrowHeadWidth);
+      modelGroup.add(arrowX);
+
+      const dirY = new THREE.Vector3(0, 1, 0);
+      const arrowY = new THREE.ArrowHelper(dirY, new THREE.Vector3(0, 0, 0), arrowLength, 0x2ed573, arrowHeadLength, arrowHeadWidth);
+      modelGroup.add(arrowY);
+
+      const dirZ = new THREE.Vector3(0, 0, 1);
+      const arrowZ = new THREE.ArrowHelper(dirZ, new THREE.Vector3(0, 0, 0), arrowLength, 0x1e90ff, arrowHeadLength, arrowHeadWidth);
+      modelGroup.add(arrowZ);
+    }
+
+    function createDroneModel() {
+      modelGroup.clear();
+      const frameMat = new THREE.MeshStandardMaterial({ color: 0x2f3542, metalness: 0.5, roughness: 0.5 });
+      const motorMat = new THREE.MeshStandardMaterial({ color: 0x00f2fe, metalness: 0.8 });
+
+      // Cross arms
+      const arm1 = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.1, 0.3), frameMat);
+      arm1.rotation.y = Math.PI / 4;
+      const arm2 = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.1, 0.3), frameMat);
+      arm2.rotation.y = -Math.PI / 4;
+      modelGroup.add(arm1);
+      modelGroup.add(arm2);
+
+      // 4 Motors
+      const d = 1.45;
+      const motorGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.3, 16);
+      [
+        [d, d], [-d, d], [d, -d], [-d, -d]
+      ].forEach(([mx, mz]) => {
+        const motor = new THREE.Mesh(motorGeo, motorMat);
+        motor.position.set(mx, 0.15, mz);
+        modelGroup.add(motor);
+      });
+
+      // Orientation Arrows
+      modelGroup.add(new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 0), 2.2, 0xff4757, 0.4, 0.2));
+      modelGroup.add(new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0), 2.2, 0x2ed573, 0.4, 0.2));
+      modelGroup.add(new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 0), 2.2, 0x1e90ff, 0.4, 0.2));
+    }
+
+    function createBoxModel() {
+      modelGroup.clear();
+      const cubeGeo = new THREE.BoxGeometry(2, 2, 2);
+      const materials = [
+        new THREE.MeshStandardMaterial({ color: 0xff4757, roughness: 0.3 }), // +X (Red)
+        new THREE.MeshStandardMaterial({ color: 0xff6b81, roughness: 0.3 }), // -X
+        new THREE.MeshStandardMaterial({ color: 0x2ed573, roughness: 0.3 }), // +Y (Green)
+        new THREE.MeshStandardMaterial({ color: 0x7bed9f, roughness: 0.3 }), // -Y
+        new THREE.MeshStandardMaterial({ color: 0x1e90ff, roughness: 0.3 }), // +Z (Blue)
+        new THREE.MeshStandardMaterial({ color: 0x70a1ff, roughness: 0.3 })  // -Z
+      ];
+      const cube = new THREE.Mesh(cubeGeo, materials);
+      modelGroup.add(cube);
+
+      modelGroup.add(new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 0), 2.5, 0xff4757, 0.4, 0.2));
+      modelGroup.add(new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0), 2.5, 0x2ed573, 0.4, 0.2));
+      modelGroup.add(new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 0), 2.5, 0x1e90ff, 0.4, 0.2));
+    }
+
+    createESP32Model();
+
+    document.getElementById('model-select').addEventListener('change', (e) => {
+      if (e.target.value === 'cube') createESP32Model();
+      else if (e.target.value === 'drone') createDroneModel();
+      else if (e.target.value === 'box') createBoxModel();
+    });
+
+    // Reset Camera
+    document.getElementById('btn-reset-cam').addEventListener('click', () => {
+      camera.position.set(4, 3, 5);
+      if (controls) {
+        controls.target.set(0, 0, 0);
+        controls.update();
+      } else {
+        camera.lookAt(0, 0, 0);
+      }
+    });
+
+    // Tare / Zero Current Orientation
+    document.getElementById('btn-zero-orientation').addEventListener('click', () => {
+      tareOffset.roll = sensorData.roll;
+      tareOffset.pitch = sensorData.pitch;
+      tareOffset.yaw = sensorData.yaw;
+      addLog(`Tare Zero set! Offsets -> R:${tareOffset.roll.toFixed(1)} P:${tareOffset.pitch.toFixed(1)} Y:${tareOffset.yaw.toFixed(1)}`, 'info');
+    });
+
+    // Window Resize Handler
+    window.addEventListener('resize', () => {
+      camera.aspect = canvasContainer.clientWidth / canvasContainer.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(canvasContainer.clientWidth, canvasContainer.clientHeight);
+    });
+
+    // -------------------------------------------------------------
+    // REAL-TIME ACCELERATION CHART (Chart.js)
+    // -------------------------------------------------------------
+    const maxDataPoints = 60;
+    const labels = Array.from({ length: maxDataPoints }, (_, i) => '');
+    const dataAx = Array(maxDataPoints).fill(0);
+    const dataAy = Array(maxDataPoints).fill(0);
+    const dataAz = Array(maxDataPoints).fill(16384);
+
+    const ctx = document.getElementById('accelChart').getContext('2d');
+    const accelChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: 'AX (X-Axis)',
+            borderColor: '#ff4757',
+            backgroundColor: 'rgba(255, 71, 87, 0.1)',
+            borderWidth: 2,
+            data: dataAx,
+            tension: 0.3,
+            pointRadius: 0
+          },
+          {
+            label: 'AY (Y-Axis)',
+            borderColor: '#2ed573',
+            backgroundColor: 'rgba(46, 213, 115, 0.1)',
+            borderWidth: 2,
+            data: dataAy,
+            tension: 0.3,
+            pointRadius: 0
+          },
+          {
+            label: 'AZ (Z-Axis)',
+            borderColor: '#1e90ff',
+            backgroundColor: 'rgba(30, 144, 255, 0.1)',
+            borderWidth: 2,
+            data: dataAz,
+            tension: 0.3,
+            pointRadius: 0
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        scales: {
+          x: { display: false },
+          y: {
+            grid: { color: currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.06)' },
+            ticks: {
+              color: currentTheme === 'dark' ? '#8892b0' : '#64748b',
+              font: { family: 'JetBrains Mono', size: 10 }
+            }
+          }
+        },
+        plugins: {
+          legend: {
+            position: 'top',
+            labels: {
+              boxWidth: 12,
+              color: currentTheme === 'dark' ? '#f1f2f6' : '#1e293b',
+              font: { family: 'Outfit', size: 11, weight: 'bold' }
+            }
+          }
+        }
+      }
+    });
+
+    function updateChart(ax, ay, az) {
+      dataAx.push(ax);
+      dataAx.shift();
+      dataAy.push(ay);
+      dataAy.shift();
+      dataAz.push(az);
+      dataAz.shift();
+      accelChart.update();
+    }
+
+    // -------------------------------------------------------------
+    // THEME SWITCHER
+    // -------------------------------------------------------------
+    function applyTheme(theme) {
+      currentTheme = theme;
+      rootEl.setAttribute('data-theme', theme);
+      localStorage.setItem('theme', theme);
+
+      if (theme === 'light') {
+        themeIconSun.style.display = 'block';
+        themeIconMoon.style.display = 'none';
+        scene.background.setHex(0xe8ecf4);
+        ambientLight.intensity = 0.9;
+      } else {
+        themeIconSun.style.display = 'none';
+        themeIconMoon.style.display = 'block';
+        scene.background.setHex(0x0a0e18);
+        ambientLight.intensity = 0.7;
+      }
+
+      // Recreate grid helper with theme colors
+      scene.remove(gridHelper);
+      gridHelper = new THREE.GridHelper(12, 24, theme === 'dark' ? 0x00f2fe : 0x0070f3, theme === 'dark' ? 0x1f2a44 : 0xc8d6e5);
+      gridHelper.position.y = -1.6;
+      scene.add(gridHelper);
+
+      // Update Chart Theme colors
+      accelChart.options.scales.y.grid.color = theme === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.06)';
+      accelChart.options.scales.y.ticks.color = theme === 'dark' ? '#8892b0' : '#64748b';
+      accelChart.options.plugins.legend.labels.color = theme === 'dark' ? '#f1f2f6' : '#1e293b';
+      accelChart.update();
+
+      addLog(`Theme changed to ${theme.toUpperCase()} mode`, 'info');
+    }
+
+    btnThemeToggle.addEventListener('click', () => {
+      const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+      applyTheme(newTheme);
+    });
+
+    // -------------------------------------------------------------
+    // DATA PARSER & TELEMETRY DISPATCHER
+    // -------------------------------------------------------------
+    function processIncomingLine(line) {
+      if (!line) return;
+      line = line.trim();
+      if (line.length === 0) return;
+
+      let tokens = line.split(',');
+      let parsed = false;
+
+      if (tokens.length >= 9) {
+        const cleanVals = tokens.map(t => {
+          const parts = t.split(':');
+          return parts.length > 1 ? parts[parts.length - 1].trim() : t.trim();
+        });
+
+        const r = parseFloat(cleanVals[0]);
+        const p = parseFloat(cleanVals[1]);
+        const y = parseFloat(cleanVals[2]);
+        const ax = parseInt(cleanVals[3], 10);
+        const ay = parseInt(cleanVals[4], 10);
+        const az = parseInt(cleanVals[5], 10);
+        const gx = parseInt(cleanVals[6], 10);
+        const gy = parseInt(cleanVals[7], 10);
+        const gz = parseInt(cleanVals[8], 10);
+
+        if (!isNaN(r) && !isNaN(p) && !isNaN(y)) {
+          sensorData.roll = r;
+          sensorData.pitch = p;
+          sensorData.yaw = y;
+          sensorData.ax = isNaN(ax) ? 0 : ax;
+          sensorData.ay = isNaN(ay) ? 0 : ay;
+          sensorData.az = isNaN(az) ? 16384 : az;
+          sensorData.gx = isNaN(gx) ? 0 : gx;
+          sensorData.gy = isNaN(gy) ? 0 : gy;
+          sensorData.gz = isNaN(gz) ? 0 : gz;
+
+          packetCount++;
+          updateUI();
+          updateChart(sensorData.ax, sensorData.ay, sensorData.az);
+          parsed = true;
+        }
+      }
+
+      if (!parsed) {
+        addLog(line);
+      }
+    }
+
+    function updateUI() {
+      const rollDeg = (sensorData.roll - tareOffset.roll);
+      const pitchDeg = (sensorData.pitch - tareOffset.pitch);
+      const yawDeg = (sensorData.yaw - tareOffset.yaw);
+
+      const toRad = Math.PI / 180;
+      modelGroup.rotation.order = 'ZYX';
+      modelGroup.rotation.x = pitchDeg * toRad;
+      modelGroup.rotation.y = yawDeg * toRad;
+      modelGroup.rotation.z = -rollDeg * toRad;
+
+      valRoll.innerHTML = `${rollDeg.toFixed(2)}<span class="tele-unit">&deg;</span>`;
+      valPitch.innerHTML = `${pitchDeg.toFixed(2)}<span class="tele-unit">&deg;</span>`;
+      valYaw.innerHTML = `${yawDeg.toFixed(2)}<span class="tele-unit">&deg;</span>`;
+
+      valGx.textContent = sensorData.gx;
+      valGy.textContent = sensorData.gy;
+      valGz.textContent = sensorData.gz;
+
+      valAxSub.textContent = (sensorData.ax / 16384.0).toFixed(2);
+      valAySub.textContent = (sensorData.ay / 16384.0).toFixed(2);
+      valAzSub.textContent = (sensorData.az / 16384.0).toFixed(2);
+
+      tableAx.textContent = sensorData.ax;
+      tableAy.textContent = sensorData.ay;
+      tableAz.textContent = sensorData.az;
+      tableGx.textContent = sensorData.gx;
+      tableGy.textContent = sensorData.gy;
+      tableGz.textContent = sensorData.gz;
+    }
+
+    // Packet Rate & Stability Meter
+    setInterval(() => {
+      const now = performance.now();
+      const dt = (now - lastPacketTime) / 1000;
+      packetRate = Math.round(packetCount / dt);
+      rateDisplay.textContent = `${packetRate} Hz`;
+      packetCount = 0;
+      lastPacketTime = now;
+
+      if (isConnected || isDemoMode) {
+        calibDot.className = 'dot calibrated';
+        calibStatusText.textContent = 'Calibrated / Tracking';
+        calibStatusText.style.color = 'var(--calibrated)';
+        calibProgress.style.width = '100%';
+        calibPercent.textContent = '100%';
+      } else {
+        calibDot.className = 'dot uncalibrated';
+        calibStatusText.textContent = 'Standby';
+        calibStatusText.style.color = 'var(--uncalibrated)';
+        calibProgress.style.width = '0%';
+        calibPercent.textContent = '0%';
+      }
+    }, 1000);
+
+    // -------------------------------------------------------------
+    // WEBSERIAL API AUTO-CONNECT
+    // -------------------------------------------------------------
+    async function connectWebSerial() {
+      if (!('serial' in navigator)) {
+        alert('WebSerial is supported in Chrome, Edge, and Opera. Please use a supported browser or connect via WebSocket.');
+        addLog('WebSerial not supported in this browser.', 'err');
+        return;
+      }
+
+      try {
+        const baud = parseInt(document.getElementById('serial-baud').value, 10);
+        addLog(`Requesting Serial Port at ${baud} baud...`, 'info');
+        serialPort = await navigator.serial.requestPort();
+        await serialPort.open({ baudRate: baud });
+
+        isConnected = true;
+        setConnectionState(true, 'Serial: Connected');
+        addLog('Serial connection established successfully.', 'info');
+
+        const textDecoder = new TextDecoderStream();
+        const readableStreamClosed = serialPort.readable.pipeTo(textDecoder.writable);
+        const reader = textDecoder.readable.getReader();
+        serialReader = reader;
+
+        let accumulated = '';
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          accumulated += value;
+          const lines = accumulated.split('\n');
+          accumulated = lines.pop();
+          for (const line of lines) {
+            processIncomingLine(line);
+          }
+        }
+      } catch (err) {
+        addLog(`Serial error: ${err.message}`, 'err');
+        setConnectionState(false, 'Disconnected');
+      }
+    }
+
+    // -------------------------------------------------------------
+    // WEBSOCKET CLIENT
+    // -------------------------------------------------------------
+    function connectWebSocket() {
+      const url = document.getElementById('ws-url').value.trim();
+      if (!url) return;
+
+      addLog(`Connecting to WebSocket: ${url}...`, 'info');
+      try {
+        socket = new WebSocket(url);
+
+        socket.onopen = () => {
+          isConnected = true;
+          setConnectionState(true, `WS: ${url}`);
+          addLog(`WebSocket connection open to ${url}`, 'info');
+        };
+
+        socket.onmessage = (event) => {
+          processIncomingLine(event.data);
+        };
+
+        socket.onerror = (err) => {
+          addLog('WebSocket error encountered', 'err');
+        };
+
+        socket.onclose = () => {
+          isConnected = false;
+          setConnectionState(false, 'Disconnected');
+          addLog('WebSocket connection closed.', 'info');
+        };
+      } catch (err) {
+        addLog(`WS Connection Failed: ${err.message}`, 'err');
+      }
+    }
+
+    function disconnectAll() {
+      if (isDemoMode) stopDemoMode();
+
+      if (serialReader) {
+        try { serialReader.cancel(); } catch(e){}
+        serialReader = null;
+      }
+      if (serialPort) {
+        try { serialPort.close(); } catch(e){}
+        serialPort = null;
+      }
+      if (socket) {
+        try { socket.close(); } catch(e){}
+        socket = null;
+      }
+      setConnectionState(false, 'Disconnected');
+      addLog('All data streams disconnected.', 'info');
+    }
+
+    function setConnectionState(active, label) {
+      isConnected = active;
+      if (active) {
+        connectionDot.className = 'dot connected';
+        connectionStatusText.textContent = label;
+      } else {
+        connectionDot.className = 'dot';
+        connectionStatusText.textContent = 'Disconnected';
+      }
+    }
+
+    // -------------------------------------------------------------
+    // DEMO / SIMULATION MODE
+    // -------------------------------------------------------------
+    function toggleDemoMode() {
+      if (isDemoMode) {
+        stopDemoMode();
+      } else {
+        startDemoMode();
+      }
+    }
+
+    function startDemoMode() {
+      disconnectAll();
+      isDemoMode = true;
+      document.getElementById('demo-btn-text').textContent = 'Stop Demo';
+      document.getElementById('btn-demo-mode').classList.add('btn-danger');
+      setConnectionState(true, 'Demo Mode');
+      addLog('Demo simulation mode started.', 'info');
+
+      let t = 0;
+      demoInterval = setInterval(() => {
+        t += 0.04;
+        const roll = Math.sin(t * 1.5) * 35.0;
+        const pitch = Math.sin(t * 1.1) * 25.0;
+        const yaw = (t * 20.0) % 360;
+
+        const ax = Math.round(Math.sin(t * 1.5) * 6000);
+        const ay = Math.round(Math.cos(t * 1.1) * 5000);
+        const az = Math.round(16384 + Math.sin(t * 2.0) * 2000);
+
+        const gx = Math.round(Math.cos(t * 1.5) * 50);
+        const gy = Math.round(-Math.sin(t * 1.1) * 40);
+        const gz = Math.round(20);
+
+        const syntheticPacket = `${roll.toFixed(2)},${pitch.toFixed(2)},${yaw.toFixed(2)},${ax},${ay},${az},${gx},${gy},${gz}`;
+        processIncomingLine(syntheticPacket);
+      }, 20);
+    }
+
+    function stopDemoMode() {
+      isDemoMode = false;
+      if (demoInterval) clearInterval(demoInterval);
+      document.getElementById('demo-btn-text').textContent = 'Start Demo';
+      document.getElementById('btn-demo-mode').classList.remove('btn-danger');
+      setConnectionState(false, 'Disconnected');
+      addLog('Demo simulation mode stopped.', 'info');
+    }
+
+    // Calibration trigger test button
+    document.getElementById('btn-trigger-calib').addEventListener('click', () => {
+      tareOffset.roll = sensorData.roll;
+      tareOffset.pitch = sensorData.pitch;
+      tareOffset.yaw = sensorData.yaw;
+      addLog('Zero calibration recomputed and applied.', 'info');
+    });
+
+    // Event Listeners
+    document.getElementById('btn-webserial').addEventListener('click', connectWebSerial);
+    document.getElementById('btn-ws-connect').addEventListener('click', connectWebSocket);
+    document.getElementById('btn-disconnect').addEventListener('click', disconnectAll);
+    document.getElementById('btn-demo-mode').addEventListener('click', toggleDemoMode);
+
+    // -------------------------------------------------------------
+    // RENDER LOOP & FPS COUNTER
+    // -------------------------------------------------------------
+    let frameCount = 0;
+    let lastFpsTime = performance.now();
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      frameCount++;
+      const now = performance.now();
+      if (now - lastFpsTime >= 1000) {
+        fpsDisplay.textContent = frameCount;
+        frameCount = 0;
+        lastFpsTime = now;
+      }
+
+      if (controls) controls.update();
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    // Apply initial theme on load
+    window.addEventListener('load', () => {
+      applyTheme(currentTheme);
+    });
+  </script>
+</body>
+</html>
